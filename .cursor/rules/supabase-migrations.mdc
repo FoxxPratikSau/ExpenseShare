@@ -1,0 +1,64 @@
+---
+description: "Enforces that all Supabase database migrations and schema changes must be managed through CLI commands only"
+globs: "*.sql,supabase/**,migrations/**"
+---
+
+# Supabase Migration Management Rule
+
+## CLI-Only Migration Policy
+
+**All database migrations and schema changes must be managed exclusively through Supabase CLI commands.**
+
+### Why CLI-Only?
+- **Version Control**: Migrations are tracked in git and can be rolled back
+- **Team Consistency**: Everyone uses the same process
+- **Environment Parity**: Same changes across development, staging, and production
+- **Audit Trail**: Clear history of who changed what and when
+
+### Prohibited Actions
+❌ **Never make direct changes through:**
+- Supabase Dashboard SQL Editor
+- Direct database connections (psql, pgAdmin, etc.)
+- Manual SQL execution in production
+
+### Required CLI Commands
+
+#### Creating New Migrations
+```bash
+# Generate a new migration file
+supabase migration new create_employees_table
+
+# Generate migration from schema changes
+supabase db diff -f migration_name
+```
+
+#### Applying Migrations
+```bash
+# Apply pending migrations to local database
+supabase migration up
+
+# Apply to remote database
+supabase db push
+```
+
+#### Migration Files Location
+- Store migration files in `supabase/migrations/`
+- Use snake_case naming convention
+- Include clear, descriptive names
+
+### Schema Management
+- Define database schema in `.sql` files within `supabase/schemas/`
+- Generate migrations from schema changes using CLI
+- Never edit migration files manually after generation
+
+### Branch Management
+- Use `supabase branch` commands for development branches
+- Test migrations on branches before merging to main
+- Use `supabase merge` to apply branch changes to production
+
+### Verification
+Before committing migrations, always:
+1. Test locally with `supabase start`
+2. Verify migration up/down works correctly
+3. Check that existing data is preserved
+4. Run tests against the new schema

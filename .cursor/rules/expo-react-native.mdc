@@ -49,3 +49,18 @@ export default MyComponent;
 - Follow React Native performance best practices
 - Use proper key props for lists
 - Handle platform differences appropriately
+
+## Supabase Integration
+- Initialize Supabase client in a dedicated service file (`services/supabase.ts`)
+- Use TypeScript types for all database operations
+- Implement proper error handling for all Supabase calls
+- Use Row Level Security (RLS) policies for data access control
+- Prefer real-time subscriptions over polling for live data
+- Handle authentication state changes with proper cleanup
+
+## Database and API Patterns
+- Create custom hooks for data fetching (e.g., `useExpenses`, `useGroups`)
+- Use optimistic updates for better user experience
+- Implement proper loading and error states
+- Cache frequently accessed data appropriately
+- Handle offline scenarios gracefully
