@@ -1,0 +1,518 @@
+---
+alwaysApply: true
+description: "Best practices for TanStack Query v5 and Zustand in React Native Expo applications"
+globs: "*.tsx,*.ts,*.jsx,*.js"
+---
+
+# TanStack Query v5 and Zustand Best Practices for React Native Expo
+
+## QueryClient Setup and Configuration
+
+### ✅ DO: Single QueryClient Instance
+Always create a single QueryClient instance and reuse it across your application. Never create QueryClient instances inside React components.
+
+```typescript
+// ✅ Good: Single instance in a dedicated file
+// services/queryClient.ts
+import { QueryClient } from '@tanstack/react-query'
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
+      retry: (failureCount, error) => {
+        // Don't retry on 4xx errors
+        if (error instanceof Error && 'status' in error && typeof error.status === 'number') {
+          if (error.status >= 400 && error.status < 500) return false
+        }
+        return failureCount < 3
+      },
+      networkMode: 'online', // React Native should handle network states
+    },
+    mutations: {
+      retry: false, // Mutations typically shouldn't retry
+      networkMode: 'online',
+    },
+  },
+})
+```
+
+```typescript
+// ❌ Bad: Creating QueryClient in component
+function App() {
+  const queryClient = new QueryClient() // Creates new instance on every render!
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Home />
+    </QueryClientProvider>
+  )
+}
+```
+
+### ✅ DO: Configure React Native Specific Options
+For React Native, configure network mode and focus refetching appropriately:
+
+```typescript
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      networkMode: 'online', // Wait for network before fetching
+      refetchOnWindowFocus: false, // Disable on mobile (causes issues)
+      refetchOnReconnect: true, // Enable when connection returns
+      refetchOnMount: true, // Usually want fresh data on mount
+    },
+  },
+})
+```
+
+## Query Keys and Structure
+
+### ✅ DO: Use Consistent Query Key Patterns
+Establish consistent patterns for query keys to enable proper caching and invalidation:
+
+```typescript
+// ✅ Good: Consistent, hierarchical keys
+const queryKeys = {
+  // Base keys
+  users: ['users'] as const,
+  posts: ['posts'] as const,
+  comments: ['comments'] as const,
+
+  // Specific variations
+  user: (id: string) => [...queryKeys.users, id] as const,
+  userPosts: (userId: string) => [...queryKeys.users, userId, 'posts'] as const,
+  post: (id: string) => [...queryKeys.posts, id] as const,
+  postComments: (postId: string) => [...queryKeys.posts, postId, 'comments'] as const,
+} as const
+
+// Usage
+const { data: user } = useQuery({
+  queryKey: queryKeys.user(userId),
+  queryFn: () => fetchUser(userId),
+})
+
+const { data: posts } = useQuery({
+  queryKey: queryKeys.userPosts(userId),
+  queryFn: () => fetchUserPosts(userId),
+})
+```
+
+### ✅ DO: Include All Dependencies in Query Keys
+Ensure query keys include all variables used in the query function:
+
+```typescript
+// ✅ Good: All dependencies in key
+const { data } = useQuery({
+  queryKey: ['posts', userId, status, page], // Includes all variables
+  queryFn: () => fetchPosts({ userId, status, page }),
+})
+
+// ❌ Bad: Missing dependencies
+const { data } = useQuery({
+  queryKey: ['posts'], // Missing userId, status, page
+  queryFn: () => fetchPosts({ userId, status, page }), // Uses variables not in key
+})
+```
+
+## Data Fetching and Mutations
+
+### ✅ DO: Use TypeScript for Better Type Safety
+Always use proper TypeScript types for queries and mutations:
+
+```typescript
+// ✅ Good: Proper typing
+interface User {
+  id: string
+  name: string
+  email: string
+}
+
+interface CreateUserData {
+  name: string
+  email: string
+}
+
+const useUser = (userId: string) => {
+  return useQuery<User, Error>({
+    queryKey: queryKeys.user(userId),
+    queryFn: (): Promise<User> => fetchUser(userId),
+  })
+}
+
+const useCreateUser = () => {
+  return useMutation<User, Error, CreateUserData>({
+    mutationFn: (data: CreateUserData) => createUser(data),
+    onSuccess: (data) => {
+      // Invalidate and refetch user list
+      queryClient.invalidateQueries({ queryKey: queryKeys.users })
+    },
+  })
+}
+```
+
+### ✅ DO: Implement Optimistic Updates for Better UX
+Use optimistic updates for mutations that improve perceived performance:
+
+```typescript
+// ✅ Good: Optimistic updates
+const useUpdateUser = () => {
+  return useMutation({
+    mutationFn: updateUser,
+    onMutate: async (newUser) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.user(newUser.id) })
+
+      // Snapshot previous value
+      const previousUser = queryClient.getQueryData(queryKeys.user(newUser.id))
+
+      // Optimistically update
+      queryClient.setQueryData(queryKeys.user(newUser.id), newUser)
+
+      // Return context for rollback
+      return { previousUser, newUser }
+    },
+    onError: (err, newUser, context) => {
+      // Rollback on error
+      if (context?.previousUser) {
+        queryClient.setQueryData(queryKeys.user(newUser.id), context.previousUser)
+      }
+    },
+    onSettled: (data, error, newUser) => {
+      // Always refetch after error or success
+      queryClient.invalidateQueries({ queryKey: queryKeys.user(newUser.id) })
+    },
+  })
+}
+```
+
+## Zustand Store Design
+
+### ✅ DO: Use Slices Pattern for Complex Stores
+Organize complex state using the slices pattern for better maintainability:
+
+```typescript
+// ✅ Good: Slices pattern
+// stores/authSlice.ts
+export interface AuthSlice {
+  user: User | null
+  isAuthenticated: boolean
+  login: (credentials: LoginCredentials) => Promise<void>
+  logout: () => void
+}
+
+export const createAuthSlice: StateCreator<AuthSlice> = (set) => ({
+  user: null,
+  isAuthenticated: false,
+  login: async (credentials) => {
+    const user = await loginUser(credentials)
+    set({ user, isAuthenticated: true })
+  },
+  logout: () => {
+    set({ user: null, isAuthenticated: false })
+  },
+})
+
+// stores/index.ts
+export const useStore = create<AuthSlice & OtherSlices>((...a) => ({
+  ...createAuthSlice(...a),
+  ...createOtherSlice(...a),
+}))
+```
+
+### ✅ DO: Use Selectors for Performance Optimization
+Always use selectors to prevent unnecessary re-renders:
+
+```typescript
+// ✅ Good: Selective subscriptions
+const UserProfile = () => {
+  const user = useStore((state) => state.user)
+  const isAuthenticated = useStore((state) => state.isAuthenticated)
+  const logout = useStore((state) => state.logout)
+
+  return (
+    <View>
+      {isAuthenticated ? (
+        <>
+          <Text>Welcome, {user?.name}</Text>
+          <Button title="Logout" onPress={logout} />
+        </>
+      ) : (
+        <Text>Please login</Text>
+      )}
+    </View>
+  )
+}
+
+// ❌ Bad: Subscribing to entire store
+const UserProfile = () => {
+  const store = useStore() // Subscribes to everything!
+  // ...
+}
+```
+
+### ✅ DO: Implement Proper Immutable Updates
+Always use immutable update patterns, especially for complex objects:
+
+```typescript
+// ✅ Good: Immutable updates
+const useProfileStore = create((set) => ({
+  profile: {
+    name: '',
+    settings: {
+      theme: 'light',
+      notifications: true,
+    },
+  },
+  updateProfile: (updates: Partial<typeof profile>) =>
+    set((state) => ({
+      profile: { ...state.profile, ...updates },
+    })),
+  updateSettings: (settings: Partial<typeof profile.settings>) =>
+    set((state) => ({
+      profile: {
+        ...state.profile,
+        settings: { ...state.profile.settings, ...settings },
+      },
+    })),
+}))
+```
+
+## Integration Patterns
+
+### ✅ DO: Use Zustand for Client State, Query for Server State
+Follow the separation of concerns - Zustand for UI state, TanStack Query for server state:
+
+```typescript
+// ✅ Good: Clear separation
+// Zustand store for UI state
+const useUISlice = create((set) => ({
+  sidebarOpen: false,
+  selectedTab: 'home',
+  setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
+  setSelectedTab: (tab: string) => set({ selectedTab: tab }),
+}))
+
+// TanStack Query for server data
+const usePosts = (userId?: string) => {
+  return useQuery({
+    queryKey: userId ? queryKeys.userPosts(userId) : queryKeys.posts,
+    queryFn: () => (userId ? fetchUserPosts(userId) : fetchPosts()),
+  })
+}
+
+### ✅ DO: Handle Loading and Error States Properly
+Implement comprehensive loading and error handling:
+
+```typescript
+// ✅ Good: Comprehensive state handling
+const PostsList = () => {
+  const { data: posts, isLoading, error, refetch } = usePosts()
+
+  if (isLoading) {
+    return <ActivityIndicator size="large" />
+  }
+
+  if (error) {
+    return (
+      <View>
+        <Text>Error loading posts</Text>
+        <Button title="Retry" onPress={() => refetch()} />
+      </View>
+    )
+  }
+
+  return (
+    <FlatList
+      data={posts}
+      renderItem={({ item }) => <PostItem post={item} />}
+      onRefresh={refetch}
+      refreshing={isLoading}
+    />
+  )
+}
+```
+
+## React Native Specific Considerations
+
+### ✅ DO: Handle Network State Changes
+Implement proper network state handling for React Native:
+
+```typescript
+// ✅ Good: Network-aware queries
+import NetInfo from '@react-native-community/netinfo'
+
+const useNetworkStore = create((set) => ({
+  isOnline: true,
+  setOnlineStatus: (isOnline: boolean) => set({ isOnline }),
+}))
+
+// Listen to network changes
+useEffect(() => {
+  const unsubscribe = NetInfo.addEventListener(state => {
+    useNetworkStore.getState().setOnlineStatus(state.isConnected ?? false)
+  })
+  return unsubscribe
+}, [])
+
+// Use in queries
+const { data } = useQuery({
+  queryKey: ['data'],
+  queryFn: fetchData,
+  enabled: useNetworkStore.getState().isOnline,
+  networkMode: 'online',
+})
+```
+
+### ✅ DO: Implement Background Fetch for Offline Support
+Handle offline scenarios gracefully:
+
+```typescript
+// ✅ Good: Offline-first approach
+const useTodos = () => {
+  return useQuery({
+    queryKey: ['todos'],
+    queryFn: fetchTodos,
+    networkMode: 'offlineFirst', // Use cache when offline
+    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
+    gcTime: 24 * 60 * 60 * 1000, // Keep in cache for 24 hours
+  })
+}
+
+// Store for offline actions
+const useOfflineStore = create((set) => ({
+  pendingActions: [],
+  addPendingAction: (action: any) =>
+    set((state) => ({
+      pendingActions: [...state.pendingActions, action],
+    })),
+}))
+```
+
+## Performance Optimization
+
+### ✅ DO: Use React.memo and useMemo for Expensive Operations
+Optimize component renders:
+
+```typescript
+// ✅ Good: Memoized components
+const PostItem = React.memo(({ post }: { post: Post }) => {
+  const formattedDate = useMemo(() =>
+    formatDate(post.createdAt), [post.createdAt]
+  )
+
+  return (
+    <View>
+      <Text>{post.title}</Text>
+      <Text>{formattedDate}</Text>
+    </View>
+  )
+})
+```
+
+### ✅ DO: Implement Proper Dependency Management
+Use exhaustive-deps and stable references:
+
+```typescript
+// ✅ Good: Stable references
+const usePostFilters = () => {
+  const [filters, setFilters] = useState({ status: 'all', category: '' })
+
+  const filteredPosts = useMemo(() =>
+    filterPosts(posts, filters), [posts, filters]
+  )
+
+  return { filters, setFilters, filteredPosts }
+}
+
+// ❌ Bad: Unstable dependencies
+const { data: posts } = useQuery({
+  queryKey: ['posts', filters], // filters object changes on every render
+  queryFn: () => fetchPosts(filters),
+})
+```
+
+## Error Handling and Debugging
+
+### ✅ DO: Implement Global Error Boundaries
+Set up proper error handling:
+
+```typescript
+// ✅ Good: Error boundaries for query errors
+const QueryErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <ErrorBoundary
+      fallback={({ error, resetError }) => (
+        <View>
+          <Text>Something went wrong</Text>
+          <Button title="Retry" onPress={resetError} />
+        </View>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  )
+}
+
+// Usage
+<QueryErrorBoundary>
+  <App />
+</QueryErrorBoundary>
+```
+
+### ✅ DO: Use DevTools for Debugging
+Enable development tools for better debugging:
+
+```typescript
+// ✅ Good: DevTools setup
+import { QueryClient } from '@tanstack/react-query'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // ... options
+    },
+  },
+})
+
+// In your App component
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {/* Your app */}
+      {__DEV__ && <ReactQueryDevtools />}
+    </QueryClientProvider>
+  )
+}
+```
+
+## File Organization
+
+### ✅ DO: Organize by Feature
+Structure your code by feature rather than by type:
+
+```typescript
+// ✅ Good: Feature-based organization
+// features/auth/
+  // hooks/
+    // useAuth.ts
+    // useAuthStore.ts
+  // components/
+    // LoginForm.tsx
+    // UserProfile.tsx
+  // services/
+    // authApi.ts
+  // types/
+    // auth.types.ts
+
+// ❌ Bad: Type-based organization
+// hooks/
+  // auth/
+  // components/
+  // auth/
+  // services/
+  // auth/
+```
+
+This structure ensures that related code is co-located and easier to maintain as features grow.
