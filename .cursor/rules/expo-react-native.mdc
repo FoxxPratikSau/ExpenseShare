@@ -1,0 +1,51 @@
+---
+alwaysApply: true
+description: Expo React Native coding standards and project structure
+---
+
+# Expo React Native Development Standards
+
+## Component Structure
+- Always write React functional components using arrow function syntax: `() => {}`
+- Never use function declarations for components
+- Use TypeScript for all components with proper typing
+
+## Project Organization
+- Create reusable components in a `components/` folder at the root level
+- Organize components by feature or functionality within subdirectories
+- Use PascalCase for component file names (e.g., `UserProfile.tsx`)
+- Export components as default exports
+
+## Code Style
+- Use arrow functions for all React components
+- Prefer const over let/var for component declarations
+- Use destructuring for props and state
+- Always include proper TypeScript types for props
+
+## Example Component Structure
+```tsx
+interface ComponentProps {
+  title: string;
+  onPress?: () => void;
+}
+
+const MyComponent = ({ title, onPress }: ComponentProps) => {
+  return (
+    // JSX here
+  );
+};
+
+export default MyComponent;
+```
+
+## File Organization
+- App screens go in `app/` directory (Expo Router structure)
+- Reusable components go in `components/` directory
+- Types and interfaces in separate files or at the top of component files
+- Use index files for cleaner imports when appropriate
+
+## React Native Best Practices
+- Use Expo's built-in components and APIs when available
+- Follow React Native performance best practices
+- Use proper key props for lists
+- Handle platform differences appropriately
