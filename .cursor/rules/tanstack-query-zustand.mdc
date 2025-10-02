@@ -297,11 +297,9 @@ const useUISlice = create((set) => ({
 const usePosts = (userId?: string) => {
   return useQuery({
     queryKey: userId ? queryKeys.userPosts(userId) : queryKeys.posts,
-    queryFn: () => userId ? fetchUserPosts(userId) : fetchPosts(),
-    enabled: !!userId, // Conditional fetching
+    queryFn: () => (userId ? fetchUserPosts(userId) : fetchPosts()),
   })
 }
-```
 
 ### ✅ DO: Handle Loading and Error States Properly
 Implement comprehensive loading and error handling:
